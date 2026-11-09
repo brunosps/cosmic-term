@@ -50,6 +50,7 @@ pub fn context_menu(
 
     let mut items = vec![
         item(fl!("new-tab"), Action::TabNew),
+        item(fl!("rename-tab"), Action::TabRename),
         MenuItem::Divider,
         item(fl!("copy"), Action::Copy),
         item(fl!("paste"), Action::Paste),
@@ -163,6 +164,7 @@ pub fn menu_bar<'a>(
                     fl!("file"),
                     vec![
                         MenuItem::Button(fl!("new-tab"), None, Action::TabNew),
+                        MenuItem::Button(fl!("rename-tab"), None, Action::TabRename),
                         MenuItem::Button(fl!("new-window"), None, Action::WindowNew),
                         MenuItem::Divider,
                         MenuItem::Folder(fl!("profile"), profile_items),

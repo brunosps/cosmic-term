@@ -772,6 +772,9 @@ impl App {
     }
 
     fn update_focus(&self) -> Task<Message> {
+        if self.tab_rename_pane.is_some() {
+            return widget::text_input::focus(self.tab_rename_id.clone());
+        }
         if self.find {
             widget::text_input::focus(self.find_search_id.clone())
         } else if self.core.window.show_context {
@@ -786,8 +789,6 @@ impl App {
             }
 
             Task::none()
-        } else if self.tab_rename_pane.is_some() {
-            widget::text_input::focus(self.tab_rename_id.clone())
         } else if let Some(terminal_id) = self.terminal_ids.get(&self.pane_model.focused()).cloned()
         {
             widget::text_input::focus(terminal_id)
@@ -2457,6 +2458,13 @@ impl Application for App {
                 config_set!(focus_follow_mouse, focus_follow_mouse);
             }
             Message::Key(modifiers, physical, key) => {
+                // The dialog owns keyboard input, including editing shortcuts.
+                if self.block_changing_terminal() {
+                    if key == Key::Named(Named::Escape) {
+                        return self.update(Message::TabRenameCancel);
+                    }
+                    return Task::none();
+                }
                 // Hard-coded keys
                 match key {
                     Key::Named(Named::Copy) => {
@@ -2545,6 +2553,9 @@ impl Application for App {
                 self.modifiers = modifiers;
             }
             Message::MouseEnter(pane) => {
+                if self.block_changing_terminal() {
+                    return Task::none();
+                }
                 self.pane_model.set_focus(pane);
                 return self.update_focus();
             }
@@ -2605,6 +2616,9 @@ impl Application for App {
                 config_set!(opacity, cmp::min(100, opacity));
             }
             Message::PaneClicked(pane) => {
+                if self.block_changing_terminal() {
+                    return Task::none();
+                }
                 self.pane_model.set_focus(pane);
                 let title_task = self.update_title(Some(pane));
                 return Task::batch([self.update_focus(), title_task]);
@@ -2973,6 +2987,9 @@ impl Application for App {
                 }
             }
             Message::TabNew => {
+                if self.block_changing_terminal() {
+                    return Task::none();
+                }
                 return self.create_and_focus_new_terminal(
                     self.pane_model.focused(),
                     self.get_default_profile(),
@@ -2980,6 +2997,9 @@ impl Application for App {
                 );
             }
             Message::TabNewNoProfile => {
+                if self.block_changing_terminal() {
+                    return Task::none();
+                }
                 return self.create_and_focus_new_terminal(
                     self.pane_model.focused(),
                     None,
@@ -3049,34 +3069,37 @@ impl Application for App {
                     let entity = tab_model.active();
                     if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
                         let terminal = terminal.lock().unwrap();
-                        match terminal.tab_title_override.clone() {
-                            None => self.tab_rename_input.clear(),
-                            Some(title) => self.tab_rename_input = title.clone(),
-                        }
-                    };
+                        self.tab_rename_input =
+                            terminal.tab_title_override.clone().unwrap_or_default();
+                    }
                 }
                 return widget::text_input::focus(self.tab_rename_id.clone());
             }
             Message::TabRenameInput(input) => self.tab_rename_input = input,
             Message::TabRenameSubmit => {
-                if let Some(pane) = self.tab_rename_pane {
+                if let Some(pane) = self.tab_rename_pane.take() {
                     if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
                         let entity = tab_model.active();
-                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                            let mut terminal = terminal.lock().unwrap();
-                            match self.tab_rename_input.is_empty() {
-                                true => {
-                                    terminal.tab_title_override = None;
-                                }
-                                false => {
-                                    terminal.tab_title_override =
-                                        Some(self.tab_rename_input.clone());
-                                }
-                            }
-                        };
-                        tab_model.text_set(entity, self.tab_rename_input.clone());
+                        let title =
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let mut terminal = terminal.lock().unwrap();
+                                let title = self.tab_rename_input.trim();
+                                terminal.tab_title_override =
+                                    (!title.is_empty()).then(|| title.to_owned());
+                                Some(
+                                    terminal
+                                        .tab_title_override
+                                        .clone()
+                                        .or_else(|| terminal.automatic_title.clone())
+                                        .unwrap_or_else(|| fl!("new-terminal")),
+                                )
+                            } else {
+                                None
+                            };
+                        if let Some(title) = title {
+                            tab_model.text_set(entity, title);
+                        }
                     }
-                    self.tab_rename_pane = None;
                     return Task::batch([self.update_title(Some(pane)), self.update_focus()]);
                 }
             }
@@ -3128,6 +3151,9 @@ impl Application for App {
                         //TODO: should we blink the cursor?
                     }
                     TermEvent::Exit => {
+                        if self.tab_rename_pane == Some(pane) {
+                            self.tab_rename_pane = None;
+                        }
                         return self.update(Message::TabClose(Some(entity)));
                     }
                     TermEvent::PtyWrite(text) => {
@@ -3142,7 +3168,8 @@ impl Application for App {
                         if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
                             let tab_title_override =
                                 if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                    let terminal = terminal.lock().unwrap();
+                                    let mut terminal = terminal.lock().unwrap();
+                                    terminal.automatic_title = None;
                                     terminal.tab_title_override.clone()
                                 } else {
                                     None
@@ -3167,7 +3194,8 @@ impl Application for App {
                         if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
                             let has_override =
                                 if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                    let terminal = terminal.lock().unwrap();
+                                    let mut terminal = terminal.lock().unwrap();
+                                    terminal.automatic_title = Some(title.clone());
                                     terminal.tab_title_override.is_some()
                                 } else {
                                     false
@@ -3435,7 +3463,7 @@ impl Application for App {
                     )
                     .into(),
             );
-        };
+        }
 
         None
     }

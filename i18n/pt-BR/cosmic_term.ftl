@@ -153,3 +153,4 @@ show-pane-borders = Mostrar bordas do quadro
 window-header = Cabeçalho da janela
 move-tab-left = Mover a aba para a esquerda
 move-tab-right = Mover a aba para a direita
+rename-tab = Renomear aba

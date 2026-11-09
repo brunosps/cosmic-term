@@ -333,6 +333,7 @@ pub fn shortcut_groups() -> Vec<ShortcutGroup> {
             KeyBindAction::TabPrev,
             KeyBindAction::TabMoveLeft,
             KeyBindAction::TabMoveRight,
+            KeyBindAction::TabRename,
             KeyBindAction::TabActivate0,
             KeyBindAction::TabActivate1,
             KeyBindAction::TabActivate2,
@@ -485,7 +486,7 @@ fn fallback_shortcuts() -> Shortcuts {
     bind!([Ctrl, Shift], "PageUp", TabMoveLeft);
     bind!([Ctrl, Shift], "PageDown", TabMoveRight);
 
-    // Ctrl+Shirt+R rename tab
+    // Ctrl+Shift+R renames the active tab.
     bind!([Ctrl, Shift], "R", TabRename);
 
     // Ctrl+Shift+# activates tabs by index
